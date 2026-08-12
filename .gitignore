@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDE / System
+.vscode/
+.DS_Store
+*.swp
+
+# Large dataset files (over GitHub 50MB/100MB limits)
+dataset/station_hour.csv
+dataset/city_hour.csv
+final_dataset/city_hour_cleaned.csv
