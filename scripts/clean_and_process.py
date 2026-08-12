@@ -7,9 +7,8 @@ warnings.filterwarnings('ignore')
 INPUT_DIR = r"c:\Users\Thilak chodagiri\Desktop\AIR\dataset"
 OUTPUT_DIR = r"c:\Users\Thilak chodagiri\Desktop\AIR\final_dataset"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-print("Starting Air Quality Data Cleaning & Feature Pipeline...")
+def main():
+    print("Starting Air Quality Data Cleaning & Feature Pipeline...")
 
 # -------------------------------------------------------------
 # CPCB Sub-Index & AQI Helper Functions
@@ -361,3 +360,6 @@ c_hour.to_csv(os.path.join(OUTPUT_DIR, "city_hour_cleaned.csv"), index=False)
 print("Saved city_hour_cleaned.csv (Shape:", c_hour.shape, ")")
 
 print("\nDataset cleaning and feature engineering successfully completed!")
+
+if __name__ == "__main__":
+    main()

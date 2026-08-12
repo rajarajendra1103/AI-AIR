@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Air Quality & Weather Forecasting Platform</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- Chart.js for High-Performance Data Visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="navbar">
+    <div class="brand">
+      <div class="brand-icon">🌍</div>
+      <div>
+        <div class="brand-title">AI Air Quality & Weather Forecaster</div>
+        <div class="brand-subtitle">PyTorch Deep Learning & Open-Meteo Telemetry</div>
+      </div>
+    </div>
+    <div class="nav-controls">
+      <button id="themeToggle" class="theme-toggle-btn" onclick="toggleTheme()">
+        <span id="themeIcon">☀️</span> <span id="themeText">Light High-Contrast</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="tabs-header">
+    <button class="tab-btn active" onclick="switchTab('forecast')">🌍 Live City Search & AI Forecast</button>
+    <button class="tab-btn" onclick="switchTab('historical')">📊 Historical Air Quality Explorer</button>
+    <button class="tab-btn" onclick="switchTab('benchmarks')">🤖 Model Benchmarks (LSTM vs GRU vs Transformer)</button>
+    <button class="tab-btn" onclick="switchTab('docs')">📘 System & Data Documentation</button>
+  </nav>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- TAB 1: LIVE FORECAST & HEALTH ADVISORY -->
+    <section id="tab-forecast" class="tab-content active">
+      <div class="page-title">Live Open-Meteo City Search & AI Forecast</div>
+      <div class="page-description">
+        Search any city globally to retrieve real-time weather & air quality telemetry, evaluate 14-day PyTorch sequence windows, and generate personalized health advisories.
+      </div>
+
+      <!-- Controls Card -->
+      <div class="card">
+        <div class="controls-grid">
+          <div class="form-group">
+            <label for="cityInput">City Name (Global)</label>
+            <input type="text" id="cityInput" class="form-input" value="Delhi" placeholder="e.g. Delhi, London, Tokyo, New York">
+          </div>
+          <div class="form-group">
+            <label for="modelSelect">PyTorch Model Architecture</label>
+            <select id="modelSelect" class="form-select">
+              <option value="GRU" selected>GRU Forecaster</option>
+              <option value="Transformer">Transformer Forecaster</option>
+              <option value="LSTM">LSTM Forecaster</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="profileSelect">User Health Profile</label>
+            <select id="profileSelect" class="form-select">
+              <!-- Dynamically populated from API -->
+            </select>
+          </div>
+          <div class="form-group" style="justify-content: flex-end;">
+            <button class="btn-primary" onclick="loadLiveForecast()">
+              🔍 Fetch Telemetry & AI Forecast
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loader -->
+      <div id="forecastLoader" class="loader-overlay">
+        <div class="spinner"></div>
+        <span>Fetching live Open-Meteo telemetry & evaluating PyTorch model...</span>
+      </div>
+
+      <!-- Results Container -->
+      <div id="forecastResults" style="display: none;">
+
+        <!-- Resolved Location Badge -->
+        <div id="locationBadge" class="alert-box">
+          📍 Location Resolved: Loading...
+        </div>
+
+        <!-- Weather Alert if present -->
+        <div id="weatherAlert" class="alert-box" style="display: none; background-color: rgba(217, 119, 6, 0.15); border-color: var(--accent-amber);">
+          ⚠️ Weather Alert
+        </div>
+
+        <!-- Live Telemetry Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🌤️ Real-Time Live Weather & Air Quality Telemetry</div>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Temperature</div>
+              <div class="metric-value" id="tempVal">--</div>
+              <div class="metric-unit">°C</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Relative Humidity</div>
+              <div class="metric-value" id="humidityVal">--</div>
+              <div class="metric-unit">%</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Wind Speed</div>
+              <div class="metric-value" id="windVal">--</div>
+              <div class="metric-unit">km/h</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Surface Pressure</div>
+              <div class="metric-value" id="pressureVal">--</div>
+              <div class="metric-unit">hPa</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Current CPCB AQI</div>
+              <div class="metric-value" id="aqiVal">--</div>
+              <div class="metric-unit" id="aqiCategory">--</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Major Pollutant</div>
+              <div class="metric-value" id="majorPollutant">--</div>
+            </div>
+          </div>
+
+          <!-- Pollutant Breakdown Grid -->
+          <div class="metrics-grid" style="margin-top: 1rem;">
+            <div class="metric-card"><div class="metric-label">PM2.5</div><div class="metric-value" id="pm25Val">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">PM10</div><div class="metric-value" id="pm10Val">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">NO2</div><div class="metric-value" id="no2Val">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">SO2</div><div class="metric-value" id="so2Val">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">CO</div><div class="metric-value" id="coVal">--</div><div class="metric-unit">mg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">O3</div><div class="metric-value" id="o3Val">--</div><div class="metric-unit">µg/m³</div></div>
+          </div>
+        </div>
+
+        <!-- PyTorch Multi-Step Forecast Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🔮 PyTorch Multi-Step Air Quality Forecast</div>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Next 1 Day Predicted AQI</div>
+              <div class="metric-value" id="pred1d">--</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Next 3 Days Predicted AQI</div>
+              <div class="metric-value" id="pred3d">--</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Next 7 Days Predicted AQI</div>
+              <div class="metric-value" id="pred7d">--</div>
+            </div>
+          </div>
+
+          <!-- Forecast Chart -->
+          <div class="chart-container">
+            <canvas id="forecastChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Personalized Health Advisory Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🩺 Weather-Aware AI Health Advisory Agent</div>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Health Risk Level</div>
+              <div class="metric-value" id="riskLevelVal">--</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Personalized Safety Score</div>
+              <div class="metric-value" id="safetyScoreVal">--</div>
+              <div class="metric-unit">out of 100</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Target Health Profile</div>
+              <div class="metric-value" id="targetProfileVal" style="font-size: 1.1rem;">--</div>
+            </div>
+          </div>
+
+          <div class="advisory-panel">
+            <div class="advisory-header">
+              <span style="font-size: 1.5rem;">📋</span>
+              <div class="advisory-title">AI Recommended Action</div>
+            </div>
+            <div class="advisory-action" id="recommendedActionVal">
+              Loading recommendation...
+            </div>
+            <div class="advisory-grid">
+              <div class="advisory-box">
+                <div class="advisory-box-title">😷 Mask Guidance</div>
+                <div class="advisory-box-text" id="maskGuidanceVal">--</div>
+              </div>
+              <div class="advisory-box">
+                <div class="advisory-box-title">💨 Air Purifier Settings</div>
+                <div class="advisory-box-text" id="purifierGuidanceVal">--</div>
+              </div>
+              <div class="advisory-box">
+                <div class="advisory-box-title">⚠️ Key Threat Factors</div>
+                <div class="advisory-box-text" id="threatFactorsVal">--</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: HISTORICAL EXPLORER -->
+    <section id="tab-historical" class="tab-content">
+      <div class="page-title">Historical Air Quality Explorer</div>
+      <div class="page-description">
+        Explore daily air pollutant trends and CPCB AQI indices across 26 Indian cities (2015–2020).
+      </div>
+
+      <div class="card">
+        <div class="form-group" style="max-width: 320px; margin-bottom: 1rem;">
+          <label for="histCitySelect">Select Historical City</label>
+          <select id="histCitySelect" class="form-select" onchange="loadHistoricalData()">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+
+        <div id="histLoader" class="loader-overlay">
+          <div class="spinner"></div>
+          <span>Loading historical records...</span>
+        </div>
+
+        <div id="histResults" style="display: none;">
+          <div class="metrics-grid">
+            <div class="metric-card"><div class="metric-label">Average AQI</div><div class="metric-value" id="histAvgAqi">--</div></div>
+            <div class="metric-card"><div class="metric-label">Max AQI</div><div class="metric-value" id="histMaxAqi">--</div></div>
+            <div class="metric-card"><div class="metric-label">Avg PM2.5</div><div class="metric-value" id="histAvgPm25">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">Avg PM10</div><div class="metric-value" id="histAvgPm10">--</div><div class="metric-unit">µg/m³</div></div>
+            <div class="metric-card"><div class="metric-label">Avg NO2</div><div class="metric-value" id="histAvgNo2">--</div><div class="metric-unit">µg/m³</div></div>
+          </div>
+
+          <div class="chart-container">
+            <canvas id="historicalChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: MODEL BENCHMARKS -->
+    <section id="tab-benchmarks" class="tab-content">
+      <div class="page-title">PyTorch Model Benchmarks</div>
+      <div class="page-description">
+        Comparative test set performance for LSTM, GRU, and Time-Series Transformer models trained on historical sequence windows.
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📊 Evaluation Metrics Table</div>
+        </div>
+        <table class="data-table" id="benchmarkTable">
+          <thead>
+            <tr>
+              <th>Model Architecture</th>
+              <th>Mean Absolute Error (MAE)</th>
+              <th>Root Mean Squared Error (RMSE)</th>
+              <th>Mean Absolute Percentage Error (MAPE %)</th>
+              <th>R² Variance Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+
+        <div class="chart-container" style="margin-top: 2rem;">
+          <canvas id="benchmarkChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: DOCUMENTATION -->
+    <section id="tab-docs" class="tab-content">
+      <div class="page-title">System Architecture & Data Dictionary</div>
+      <div class="page-description">
+        Overview of open data integrations, PyTorch neural architectures, and AI health advisory logic.
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🌐 Live Open-Meteo API Integration</div>
+        </div>
+        <p style="font-weight: 600; color: var(--text-secondary);">
+          • <strong>Geocoding Service:</strong> Resolves global city queries into geographic latitude and longitude.<br>
+          • <strong>Real-Time Weather:</strong> Fetches temperature, relative humidity, wind speed, wind direction, and surface pressure.<br>
+          • <strong>Air Quality Telemetry:</strong> Fetches hourly PM2.5, PM10, NO2, SO2, CO, O3, and NH3 values.<br>
+          • <strong>14-Day Resampling:</strong> Aggregates historical 14-day hourly readings into <code>[14, 10]</code> daily feature sequences fed directly into PyTorch models.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🤖 PyTorch Deep Learning Models</div>
+        </div>
+        <p style="font-weight: 600; color: var(--text-secondary);">
+          • <strong>LSTM (`LSTMForecaster`):</strong> 2-layer stacked Long Short-Term Memory network capturing long-term dependencies.<br>
+          • <strong>GRU (`GRUForecaster`):</strong> 2-layer stacked Gated Recurrent Unit offering computational efficiency.<br>
+          • <strong>Transformer (`TransformerForecaster`):</strong> Time-series Multi-Head Self-Attention Encoder with sinusoidal positional embeddings.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🩺 Weather-Aware AI Health Advisory Agent</div>
+        </div>
+        <p style="font-weight: 600; color: var(--text-secondary);">
+          • <strong>Supported Profiles:</strong> General Public, Asthma/Respiratory, Cardiovascular/Heart Disease, Elderly (65+), Children & Infants, Outdoor Athletes.<br>
+          • <strong>Safety Scoring:</strong> Custom 0–100 sensitivity metric weighted by underlying vulnerability and ambient pollutant concentration.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    AI Air Quality & Weather Forecasting Platform • PyTorch + Open-Meteo + FastAPI
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
