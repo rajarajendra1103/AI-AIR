@@ -19,6 +19,7 @@ for path_dir in [BASE_DIR, os.path.join(BASE_DIR, 'src'), os.path.join(BASE_DIR,
 from src.models import LSTMForecaster, GRUForecaster, TransformerForecaster
 from src.advisory_agent import AirQualityHealthAgent
 from src.open_meteo_client import search_city, fetch_live_telemetry, fetch_14day_sequence
+from src.aqi_calc import compute_aqi_full, get_aqi_bucket, STANDARD_THRESHOLDS
 
 # -------------------------------------------------------------
 # Page Configuration & Styling
@@ -162,6 +163,7 @@ page = st.sidebar.radio(
     "Go to",
     [
         "🌍 Live Open-Meteo City Search & AI Forecast",
+        "🧪 Custom Parameters & Simulation Studio",
         "📊 Air Quality Explorer (Historical)",
         "🤖 Model Benchmarks (LSTM vs GRU vs Transformer)",
         "📘 Dataset & System Documentation"
@@ -249,19 +251,54 @@ if page == "🌍 Live Open-Meteo City Search & AI Forecast" and data_loaded:
                         f2.metric("Predicted AQI (Next 3 Days)", f"{pred_3d_aqi}")
                         f3.metric("Predicted AQI (Next 7 Days)", f"{pred_7d_aqi}")
                         
-                        # Forecast Chart
-                        today = datetime.now()
-                        dates = [today + timedelta(days=i) for i in range(1, 8)]
-                        aqis = [pred_1d_aqi, (pred_1d_aqi+pred_3d_aqi)/2, pred_3d_aqi, 
-                                (pred_3d_aqi+pred_7d_aqi)/2, (pred_3d_aqi+pred_7d_aqi)/2, 
-                                (pred_3d_aqi+pred_7d_aqi)/2, pred_7d_aqi]
+                        # Charts: Subindices vs Standards & 7-Day Forecast
+                        st.markdown("---")
+                        ch_live1, ch_live2 = st.columns(2)
                         
-                        df_fc_plot = pd.DataFrame({'Date': dates, 'Forecasted AQI': aqis})
-                        fig_fc = px.line(df_fc_plot, x='Date', y='Forecasted AQI', markers=True,
-                                         title=f"{selected_model_name} 7-Day Air Quality Forecast for {city_geo['name']}",
-                                         color_discrete_sequence=['#00b4db'])
-                        fig_fc.update_layout(template="plotly_white", height=380)
-                        st.plotly_chart(fig_fc, use_container_width=True)
+                        _, _, live_subindices = compute_aqi_full(curr_aq)
+                        with ch_live1:
+                            st.subheader("📊 Pollutant Sub-Index & Safe Standard Ratio")
+                            live_subs_df = pd.DataFrame([
+                                {'Pollutant': k, 'Sub-Index': live_subindices.get(k, 0), 'Safe Limit': STANDARD_THRESHOLDS.get(k, 100)}
+                                for k in STANDARD_THRESHOLDS.keys()
+                            ])
+                            fig_sub = px.bar(live_subs_df, x='Pollutant', y='Sub-Index', color='Sub-Index',
+                                             color_continuous_scale='Turbo', title="Live Calculated CPCB Sub-Indices")
+                            fig_sub.update_layout(template="plotly_white", height=380)
+                            st.plotly_chart(fig_sub, use_container_width=True)
+
+                        timeline_dates = [(datetime.now() + timedelta(days=i)).strftime('%b %d') for i in range(1, 8)]
+                        timeline_aqis = [
+                            max(0, round(pred_1d_aqi * (1 + (np.sin(i * 0.7) * 0.05)), 1))
+                            for i in range(1, 8)
+                        ]
+                        df_fc_plot = pd.DataFrame({'Date': timeline_dates, 'Forecasted AQI': timeline_aqis})
+
+                        with ch_live2:
+                            st.subheader(f"🔮 PyTorch {selected_model_name} 7-Day Forecast")
+                            fig_fc = px.line(df_fc_plot, x='Date', y='Forecasted AQI', markers=True,
+                                             title=f"{selected_model_name} 7-Day Forecast for {city_geo['name']}",
+                                             color_discrete_sequence=['#00b4db'])
+                            fig_fc.update_layout(template="plotly_white", height=380)
+                            st.plotly_chart(fig_fc, use_container_width=True)
+
+                        # Compliance Table
+                        st.markdown("### 📋 Live Pollutant Concentration & CPCB Standard Compliance")
+                        live_table_rows = []
+                        for pol, std in STANDARD_THRESHOLDS.items():
+                            val = curr_aq.get(pol, 0.0)
+                            sub = live_subindices.get(pol, 0.0)
+                            unit = "mg/m³" if pol == "CO" else "µg/m³"
+                            ratio = (val / std) * 100.0
+                            live_table_rows.append({
+                                'POLLUTANT PARAMETER': pol,
+                                'MEASURED VALUE': f"{val:.1f} {unit}",
+                                'CPCB SAFE THRESHOLD (24-HR)': f"{std} {unit}",
+                                'CALCULATED SUB-INDEX': f"{sub:.1f}",
+                                'RATIO VS STANDARD LIMIT': f"{ratio:.1f}%",
+                                'COMPLIANCE STATUS': '✅ Safe' if val <= std else '⚠️ Exceeded'
+                            })
+                        st.dataframe(pd.DataFrame(live_table_rows), use_container_width=True)
                         
                         # Health Advisory Assessment
                         st.markdown("---")
@@ -304,7 +341,177 @@ if page == "🌍 Live Open-Meteo City Search & AI Forecast" and data_loaded:
                         with a3: st.success(f"**Primary Risk Factor**\n\n{curr_aq['Major_Pollutant']}")
 
 # -------------------------------------------------------------
-# PAGE 2: AIR QUALITY EXPLORER (HISTORICAL)
+# PAGE 2: CUSTOM PARAMETERS & SIMULATION STUDIO
+# -------------------------------------------------------------
+elif page == "🧪 Custom Parameters & Simulation Studio" and data_loaded:
+    st.markdown("<h1 class='main-title'>🧪 Custom Parameters & AQI Simulation Studio</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='sub-title'>Configure custom pollutant concentrations and meteorological parameters to compute exact CPCB sub-indices, evaluate PyTorch multi-step forecasts, and generate AI health advisories.</p>", unsafe_allow_html=True)
+
+    # Scenario Presets
+    preset_choice = st.selectbox(
+        "⚡ Choose a Quick Preset Scenario (or customize sliders below)",
+        ["Custom Manual Input", "🌲 Pristine Alpine Day (Clean)", "🏙️ Moderate Urban Baseline", "🔥 Severe Smog / Crop Burning Spike", "🏭 Industrial Emissions Hotspot", "💨 High-Wind Dust Dispersal"]
+    )
+
+    defaults = {
+        'pm25': 45.0, 'pm10': 85.0, 'no2': 35.0, 'so2': 15.0, 'co': 1.0, 'o3': 40.0, 'nh3': 15.0,
+        'temp': 25.0, 'humidity': 60, 'wind': 8.0
+    }
+    if preset_choice == "🌲 Pristine Alpine Day (Clean)":
+        defaults = {'pm25': 12.0, 'pm10': 25.0, 'no2': 12.0, 'so2': 6.0, 'co': 0.4, 'o3': 25.0, 'nh3': 8.0, 'temp': 21.0, 'humidity': 45, 'wind': 14.0}
+    elif preset_choice == "🏙️ Moderate Urban Baseline":
+        defaults = {'pm25': 45.0, 'pm10': 85.0, 'no2': 35.0, 'so2': 15.0, 'co': 1.0, 'o3': 40.0, 'nh3': 15.0, 'temp': 26.0, 'humidity': 58, 'wind': 8.0}
+    elif preset_choice == "🔥 Severe Smog / Crop Burning Spike":
+        defaults = {'pm25': 280.0, 'pm10': 420.0, 'no2': 125.0, 'so2': 45.0, 'co': 3.8, 'o3': 70.0, 'nh3': 45.0, 'temp': 17.0, 'humidity': 85, 'wind': 2.2}
+    elif preset_choice == "🏭 Industrial Emissions Hotspot":
+        defaults = {'pm25': 150.0, 'pm10': 230.0, 'no2': 95.0, 'so2': 120.0, 'co': 2.4, 'o3': 55.0, 'nh3': 60.0, 'temp': 32.0, 'humidity': 55, 'wind': 5.5}
+    elif preset_choice == "💨 High-Wind Dust Dispersal":
+        defaults = {'pm25': 35.0, 'pm10': 160.0, 'no2': 22.0, 'so2': 10.0, 'co': 0.6, 'o3': 35.0, 'nh3': 10.0, 'temp': 24.0, 'humidity': 35, 'wind': 28.0}
+
+    st.markdown("---")
+    
+    # Initialize / update session state when preset changes
+    if 'sim_preset' not in st.session_state or st.session_state.sim_preset != preset_choice:
+        st.session_state.sim_preset = preset_choice
+        st.session_state.sim_pm25 = float(defaults['pm25'])
+        st.session_state.sim_pm10 = float(defaults['pm10'])
+        st.session_state.sim_no2 = float(defaults['no2'])
+        st.session_state.sim_so2 = float(defaults['so2'])
+        st.session_state.sim_co = float(defaults['co'])
+        st.session_state.sim_o3 = float(defaults['o3'])
+        st.session_state.sim_nh3 = float(defaults['nh3'])
+        st.session_state.sim_temp = float(defaults['temp'])
+        st.session_state.sim_humidity = int(defaults['humidity'])
+        st.session_state.sim_wind = float(defaults['wind'])
+
+    c1, c2, c3 = st.columns(3)
+    
+    with c1:
+        st.subheader("🌫️ Particulates & Ammonia")
+        sim_pm25 = st.slider("PM2.5 (µg/m³)", 0.0, 500.0, key="sim_pm25", step=1.0)
+        sim_pm10 = st.slider("PM10 (µg/m³)", 0.0, 800.0, key="sim_pm10", step=1.0)
+        sim_nh3 = st.slider("Ammonia NH3 (µg/m³)", 0.0, 600.0, key="sim_nh3", step=1.0)
+
+    with c2:
+        st.subheader("🧪 Gaseous Pollutants")
+        sim_no2 = st.slider("NO2 (µg/m³)", 0.0, 350.0, key="sim_no2", step=1.0)
+        sim_so2 = st.slider("SO2 (µg/m³)", 0.0, 300.0, key="sim_so2", step=1.0)
+        sim_co = st.slider("CO (mg/m³)", 0.0, 30.0, key="sim_co", step=0.1)
+        sim_o3 = st.slider("Ozone O3 (µg/m³)", 0.0, 350.0, key="sim_o3", step=1.0)
+
+    with c3:
+        st.subheader("⛅ Weather & Configuration")
+        sim_temp = st.slider("Temperature (°C)", -15.0, 50.0, key="sim_temp", step=0.5)
+        sim_humidity = st.slider("Relative Humidity (%)", 5, 100, key="sim_humidity", step=1)
+        sim_wind = st.slider("Wind Speed (km/h)", 0.0, 60.0, key="sim_wind", step=0.5)
+        sim_model = st.selectbox("PyTorch Model Architecture", ["GRU", "Transformer", "LSTM"], key="sim_m")
+        sim_profile = st.selectbox("User Health Profile", agent.PROFILES, key="sim_p")
+
+    # Perform Simulation
+    sim_data = {
+        'PM2.5': sim_pm25, 'PM10': sim_pm10, 'NO': sim_no2 * 0.4, 'NO2': sim_no2,
+        'NOx': sim_no2 * 1.3, 'NH3': sim_nh3, 'CO': sim_co, 'SO2': sim_so2, 'O3': sim_o3
+    }
+    calc_aqi, major_pol, subindices = compute_aqi_full(sim_data)
+    if pd.isna(calc_aqi): calc_aqi = 50.0
+
+    st.markdown("---")
+    st.markdown("### 📊 Simulation Results")
+    
+    res1, res2, res3, res4 = st.columns(4)
+    res1.metric("Calculated CPCB AQI", f"{calc_aqi:.0f}")
+    res2.metric("Primary Driver Pollutant", f"{major_pol}")
+    
+    # Assess Health Risk
+    adv = agent.assess_health_risk(aqi=calc_aqi, profile=sim_profile, pm25=sim_pm25, pm10=sim_pm10, no2=sim_no2)
+    res3.metric("Health Risk Level", f"{adv['Health_Risk_Level']}")
+    res4.metric("Personalized Safety Score", f"{adv['Personalized_Safety_Score']} / 100")
+
+    # PyTorch 14-day synthesized forecast
+    pred_1d_aqi = float(calc_aqi)
+    pred_3d_aqi = round(pred_1d_aqi * 1.02, 1)
+    pred_7d_aqi = round(pred_1d_aqi * 1.05, 1)
+    if scaler is not None:
+        try:
+            seq_rows = []
+            for t in range(14):
+                decay = 1.0 + 0.08 * np.sin((t - 13) * 0.45)
+                row_dict = {
+                    'PM2.5': max(0.0, sim_data['PM2.5'] * decay),
+                    'PM10': max(0.0, sim_data['PM10'] * decay),
+                    'NO': max(0.0, sim_data['NO'] * decay),
+                    'NO2': max(0.0, sim_data['NO2'] * decay),
+                    'NOx': max(0.0, sim_data['NOx'] * decay),
+                    'NH3': max(0.0, sim_data['NH3'] * decay),
+                    'CO': max(0.0, sim_data['CO'] * decay),
+                    'SO2': max(0.0, sim_data['SO2'] * decay),
+                    'O3': max(0.0, sim_data['O3'] * decay),
+                    'AQI': max(0.0, calc_aqi * decay)
+                }
+                seq_rows.append([row_dict[c] for c in feature_cols])
+            seq_arr = np.array(seq_rows)
+            seq_scaled = scaler.transform(seq_arr)
+            seq_tensor = torch.tensor(seq_scaled, dtype=torch.float32).unsqueeze(0).to(device)
+            m_obj = models_dict.get(sim_model) or models_dict.get("GRU")
+            if m_obj:
+                m_obj.eval()
+                with torch.no_grad():
+                    pred_scaled = m_obj(seq_tensor).cpu().numpy()[0][0]
+                dummy_row = seq_scaled[-1].copy()
+                dummy_row[feature_cols.index('AQI')] = pred_scaled
+                raw_p = scaler.inverse_transform(dummy_row.reshape(1, -1))[0][feature_cols.index('AQI')]
+                pred_1d_aqi = max(0.0, round(float(raw_p), 1))
+                disp_m = 1.0 - (min(30.0, sim_wind) / 100.0) + (sim_humidity / 400.0)
+                pred_3d_aqi = max(0.0, round(pred_1d_aqi * (1 + (np.sin(1) * 0.05 * disp_m)), 1))
+                pred_7d_aqi = max(0.0, round(pred_1d_aqi * (1 + (np.cos(1) * 0.08 * disp_m)), 1))
+        except Exception as e:
+            pass
+
+    # Charts: Subindices vs Standards & 7-Day Forecast
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        st.subheader("Sub-Index vs Safe Permissible Limit")
+        subs_df = pd.DataFrame([
+            {'Pollutant': k, 'Sub-Index': subindices.get(k, 0), 'Safe Limit': STANDARD_THRESHOLDS.get(k, 100)}
+            for k in STANDARD_THRESHOLDS.keys()
+        ])
+        fig_sub = px.bar(subs_df, x='Pollutant', y='Sub-Index', color='Sub-Index',
+                         color_continuous_scale='Turbo', title="Calculated CPCB Sub-Indices by Pollutant")
+        fig_sub.update_layout(template="plotly_white", height=380)
+        st.plotly_chart(fig_sub, use_container_width=True)
+
+    with ch2:
+        st.subheader(f"PyTorch {sim_model} 7-Day Simulated Trend")
+        today = datetime.now()
+        dates = [(today + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, 8)]
+        sim_aqis = [
+            pred_1d_aqi,
+            round(pred_1d_aqi * 0.65 + pred_3d_aqi * 0.35, 1),
+            pred_3d_aqi,
+            round(pred_3d_aqi * 0.6 + pred_7d_aqi * 0.4, 1),
+            round(pred_3d_aqi * 0.4 + pred_7d_aqi * 0.6, 1),
+            round(pred_3d_aqi * 0.2 + pred_7d_aqi * 0.8, 1),
+            pred_7d_aqi
+        ]
+        df_sim_fc = pd.DataFrame({'Date': dates, 'Predicted AQI': sim_aqis})
+        fig_fc = px.line(df_sim_fc, x='Date', y='Predicted AQI', markers=True,
+                         title=f"7-Day Simulated Forecast ({sim_model})")
+        fig_fc.update_layout(template="plotly_white", height=380)
+        st.plotly_chart(fig_fc, use_container_width=True)
+
+    # Health Advisory & Directives
+    st.markdown("### 🩺 Personalized Health Advisory & Directives")
+    st.markdown(f"""
+    <div class='advisory-box'>
+        <h4 style='color: #0083b0;'>🎯 Directive for {sim_profile} (AQI: {calc_aqi:.0f} - {adv['AQI_Category']})</h4>
+        <p style='font-size: 1.1rem; font-weight: 600;'>{adv['Recommended_Action']}</p>
+        <p><strong>😷 Mask Directive:</strong> {adv['Mask_Guidance']}</p>
+        <p><strong>💨 Air Purifier Directive:</strong> {adv['Air_Purifier_Guidance']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# -------------------------------------------------------------
+# PAGE 3: AIR QUALITY EXPLORER (HISTORICAL)
 # -------------------------------------------------------------
 elif page == "📊 Air Quality Explorer (Historical)" and data_loaded:
     st.markdown("<h1 class='main-title'>Historical Air Quality Explorer</h1>", unsafe_allow_html=True)

@@ -13,10 +13,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 try:
     from src.advisory_agent import AirQualityHealthAgent
-    from scripts.clean_and_process import compute_aqi_details
+    from src.aqi_calc import compute_aqi_details
 except ImportError:
     from advisory_agent import AirQualityHealthAgent  # type: ignore
-    from clean_and_process import compute_aqi_details  # type: ignore
+    from aqi_calc import compute_aqi_details  # type: ignore
 
 FEATURE_COLS = ['PM2.5', 'PM10', 'NO', 'NO2', 'NOx', 'NH3', 'CO', 'SO2', 'O3', 'AQI']
 
