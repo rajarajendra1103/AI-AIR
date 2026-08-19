@@ -20,6 +20,7 @@ let appData = {
 let lastSimulationResult = null;
 let simDebounceTimer = null;
 let particlesAnimationId = null;
+let isFetchingForecast = false;  // guard against concurrent forecast requests
 
 // Preset definitions
 const PRESETS = {
@@ -487,6 +488,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 // 6. Live Open-Meteo & AI Forecast
 // -------------------------------------------------------------
 async function loadLiveForecast() {
+  // Prevent multiple simultaneous requests
+  if (isFetchingForecast) return;
+  isFetchingForecast = true;
+
   const city = document.getElementById('cityInput').value.trim() || 'Delhi';
   const modelName = document.getElementById('modelSelect').value;
   const profile = document.getElementById('profileSelect').value;
@@ -520,9 +525,11 @@ async function loadLiveForecast() {
     const res = await fetch(`/api/forecast?city=${encodeURIComponent(city)}&model_name=${encodeURIComponent(modelName)}&profile=${encodeURIComponent(profile)}`);
     
     if (!res.ok) {
-      const err = await res.json();
-      alert(`Error: ${err.detail || 'Failed to fetch forecast.'}`);
+      let errMsg = 'Failed to fetch forecast.';
+      try { const err = await res.json(); errMsg = err.detail || errMsg; } catch(_) {}
+      alert(`Error: ${errMsg}`);
       resetFetchButton();
+      isFetchingForecast = false;
       return;
     }
 
@@ -530,6 +537,14 @@ async function loadLiveForecast() {
     if (fetchBtnProgress) fetchBtnProgress.style.width = "95%";
 
     const data = await res.json();
+
+    // Show banner if live telemetry was unavailable (API rate limit / network)
+    const telemetryAlert = document.getElementById('weatherAlert');
+    if (telemetryAlert && data.telemetry_available === false) {
+      telemetryAlert.innerHTML = '⚠️ <strong>Live Data Unavailable</strong>: Open-Meteo API is temporarily unreachable. Showing estimated values.';
+      telemetryAlert.style.display = 'flex';
+    }
+
     renderLiveForecast(data);
 
     if (fetchBtnText) fetchBtnText.textContent = "✓ Forecast Ready";
@@ -545,6 +560,8 @@ async function loadLiveForecast() {
     console.error("Forecast fetch error:", err);
     alert("Unable to fetch telemetry or prediction. Please check network connection.");
     resetFetchButton();
+  } finally {
+    isFetchingForecast = false;
   }
 }
 

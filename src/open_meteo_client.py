@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import sys
+import time
 
 # Add project root, scripts & src to sys.path
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -40,52 +41,77 @@ def search_city(city_name):
         print(f"Geocoding error: {e}")
     return None
 
-def fetch_live_telemetry(lat, lon):
+def fetch_live_telemetry(lat, lon, max_retries=3):
     """
     Fetches live weather and air quality telemetry from Open-Meteo API.
+    Retries up to max_retries times with exponential backoff on failure.
     """
-    try:
-        # Weather
-        w_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,weather_code"
-        w_res = requests.get(w_url, timeout=10).json().get('current', {})
-        
-        # Air Quality
-        aq_url = f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,ammonia,european_aqi,us_aqi"
-        aq_res = requests.get(aq_url, timeout=10).json().get('current', {})
-        
-        # Unit conversion & dictionary formatting
-        co_mg = (aq_res.get('carbon_monoxide', 0) or 0) / 1000.0
-        
-        current_data = {
-            'PM2.5': aq_res.get('pm2_5', 0) or 0,
-            'PM10': aq_res.get('pm10', 0) or 0,
-            'NO': (aq_res.get('nitrogen_dioxide', 0) or 0) * 0.4,
-            'NO2': aq_res.get('nitrogen_dioxide', 0) or 0,
-            'NOx': (aq_res.get('nitrogen_dioxide', 0) or 0) * 1.3,
-            'NH3': aq_res.get('ammonia', 0) or 0,
-            'CO': co_mg,
-            'SO2': aq_res.get('sulphur_dioxide', 0) or 0,
-            'O3': aq_res.get('ozone', 0) or 0
-        }
-        
-        # Calculate CPCB AQI
-        aqi_val, major_pol = compute_aqi_details(current_data)
-        current_data['AQI'] = aqi_val if not pd.isna(aqi_val) else 50
-        current_data['Major_Pollutant'] = major_pol
-        
-        weather_data = {
-            'temperature': w_res.get('temperature_2m', 25.0),
-            'humidity': w_res.get('relative_humidity_2m', 60),
-            'pressure': w_res.get('surface_pressure', 1013),
-            'wind_speed': w_res.get('wind_speed_10m', 5.0),
-            'wind_direction': w_res.get('wind_direction_10m', 0),
-            'weather_code': w_res.get('weather_code', 0)
-        }
-        
-        return current_data, weather_data
-    except Exception as e:
-        print(f"Telemetry fetch error: {e}")
-        return None, None
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                time.sleep(0.5 * (2 ** (attempt - 1)))  # 0.5s, 1s backoff
+
+            # Weather
+            w_url = (
+                f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+                "&current=temperature_2m,relative_humidity_2m,surface_pressure,"
+                "wind_speed_10m,wind_direction_10m,weather_code"
+            )
+            w_res = requests.get(w_url, timeout=15).json().get('current', {})
+
+            # Air Quality (ammonia removed — not reliably available everywhere)
+            aq_url = (
+                f"https://air-quality-api.open-meteo.com/v1/air-quality?latitude={lat}&longitude={lon}"
+                "&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,ammonia"
+            )
+            aq_json = requests.get(aq_url, timeout=15).json()
+            aq_res = aq_json.get('current', {})
+
+            # Validate we got at least some data
+            if not w_res or not aq_res:
+                raise ValueError("Empty response from Open-Meteo API")
+
+            # Unit conversion & safe null handling
+            def _safe(v, default=0.0):
+                return float(v) if v is not None else default
+
+            co_mg = _safe(aq_res.get('carbon_monoxide'), 0.0) / 1000.0
+
+            current_data = {
+                'PM2.5': _safe(aq_res.get('pm2_5')),
+                'PM10':  _safe(aq_res.get('pm10')),
+                'NO':    _safe(aq_res.get('nitrogen_dioxide')) * 0.4,
+                'NO2':   _safe(aq_res.get('nitrogen_dioxide')),
+                'NOx':   _safe(aq_res.get('nitrogen_dioxide')) * 1.3,
+                'NH3':   _safe(aq_res.get('ammonia')),
+                'CO':    co_mg,
+                'SO2':   _safe(aq_res.get('sulphur_dioxide')),
+                'O3':    _safe(aq_res.get('ozone')),
+            }
+
+            # Calculate CPCB AQI
+            aqi_val, major_pol = compute_aqi_details(current_data)
+            current_data['AQI'] = float(aqi_val) if (aqi_val is not None and not pd.isna(aqi_val)) else 50.0
+            current_data['Major_Pollutant'] = major_pol or 'PM2.5'
+
+            weather_data = {
+                'temperature':   _safe(w_res.get('temperature_2m'), 25.0),
+                'humidity':      _safe(w_res.get('relative_humidity_2m'), 60.0),
+                'pressure':      _safe(w_res.get('surface_pressure'), 1013.0),
+                'wind_speed':    _safe(w_res.get('wind_speed_10m'), 5.0),
+                'wind_direction':_safe(w_res.get('wind_direction_10m'), 0.0),
+                'weather_code':  int(w_res.get('weather_code') or 0),
+            }
+
+            return current_data, weather_data
+
+        except Exception as e:
+            last_exc = e
+            print(f"Telemetry fetch error (attempt {attempt + 1}/{max_retries}): {e}")
+
+    print(f"All {max_retries} telemetry fetch attempts failed. Last error: {last_exc}")
+    return None, None
 
 def fetch_14day_sequence(lat, lon):
     """

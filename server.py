@@ -138,10 +138,20 @@ def get_forecast(
 
     lat, lon = city_geo['lat'], city_geo['lon']
 
-    # Fetch live telemetry
+    # Fetch live telemetry — use fallback defaults if the API is temporarily unavailable
     curr_aq, curr_w = fetch_live_telemetry(lat, lon)
-    if not curr_aq or not curr_w:
-        raise HTTPException(status_code=500, detail="Failed to fetch live telemetry from Open-Meteo API.")
+    telemetry_available = bool(curr_aq and curr_w)
+    if not telemetry_available:
+        print(f"Warning: Live telemetry unavailable for {city}. Using fallback defaults.")
+        curr_aq = {
+            'PM2.5': 45.0, 'PM10': 85.0, 'NO': 14.0, 'NO2': 35.0, 'NOx': 45.5,
+            'NH3': 15.0, 'CO': 1.0, 'SO2': 15.0, 'O3': 40.0, 'AQI': 120.0,
+            'Major_Pollutant': 'PM2.5'
+        }
+        curr_w = {
+            'temperature': 28.0, 'humidity': 60, 'pressure': 1010.0,
+            'wind_speed': 8.0, 'wind_direction': 180, 'weather_code': 1
+        }
 
     # 14-day sequence for PyTorch model prediction
     seq_14d = fetch_14day_sequence(lat, lon)
@@ -218,6 +228,7 @@ def get_forecast(
 
     return {
         "location": city_geo,
+        "telemetry_available": telemetry_available,
         "telemetry": {
             "air_quality": curr_aq,
             "weather": curr_w
